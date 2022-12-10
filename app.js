@@ -150,7 +150,7 @@ app.get("/user/tweets/feed", authenticateToken, async (request, response) => {
         ON tweet.user_id = user.user_id
     WHERE 
         follower.follower_user_id = ${userId}
-    LIMIT 4;
+    LIMIT ${4};
   `;
   const dbResponse = await db.all(getUserFollowingTweetsQuery);
   response.send(dbResponse);
@@ -261,8 +261,12 @@ app.get("/tweets/:tweetId/", authenticateToken, async (request, response) => {
             ON reply.tweet_id = tweet.tweet_id
             INNER JOIN like 
             ON like.tweet_id = tweet.tweet_id
+            INNER JOIN user
+            On user.user_id = tweet.user_id
         WHERE
             tweet.tweet_id = ${tweetId}
+        GROUP BY 
+            user.user_id
         
     `;
     const dbResponse = await db.all(getUserRequestedTweetQuery);
@@ -418,17 +422,50 @@ app.get("/user/tweets/", authenticateToken, async (request, response) => {
 
   const userId = dbUser.user_id;
 
-  const getUserTweetsQuery = `
+  let resultList = [];
+  const getUserTweetsLikesQuery = `
     SELECT 
-        *
+        tweet,
+        COUNT(like.like_id) AS likes,
+        date_time AS dateTime
     FROM  
         user INNER JOIN tweet 
         ON user.user_id = tweet.user_id
+        INNER JOIN like
+        ON like.tweet_id = tweet.tweet_id
+
     WHERE
-        user.user_id = ${userId}
+        tweet.user_id = ${userId}
+    GROUP BY 
+        tweet.tweet_id
   `;
-  const dbResponse = await db.all(getUserTweetsQuery);
-  response.send(dbResponse);
+  const dbResponse1 = await db.all(getUserTweetsLikesQuery);
+
+  for (let tweet of dbResponse1) {
+    resultList.push(tweet);
+  }
+  const getUserTweetsRepliesQuery = `
+    SELECT 
+        tweet,
+        COUNT(reply.reply_id) AS replies,
+        date_time AS dateTime
+    FROM  
+        user INNER JOIN tweet 
+        ON user.user_id = tweet.user_id
+        INNER JOIN reply
+        ON reply.tweet_id = tweet.tweet_id
+
+    WHERE
+        tweet.user_id = ${userId}
+    GROUP BY 
+        tweet.tweet_id
+  `;
+  const dbResponse2 = await db.all(getUserTweetsRepliesQuery);
+  for (let tweet of dbResponse2) {
+    resultList.push(tweet);
+  }
+
+  response.send(resultList);
 });
 
 //USER CREATE TWEET API
@@ -436,7 +473,6 @@ app.post("/user/tweets/", authenticateToken, async (request, response) => {
   const { username } = request;
   const tweetDetails = request.body;
   const { tweet } = tweetDetails;
-  console.log(tweet);
 
   const getUserQuery = `
     SELECT 
@@ -449,6 +485,25 @@ app.post("/user/tweets/", authenticateToken, async (request, response) => {
   const dbUser = await db.get(getUserQuery);
 
   const userId = dbUser.user_id;
+
+  const now = new Date();
+  const date =
+    now.getFullYear() + "-" + (now.getMonth() + 1) + "-" + now.getDate();
+  const time = now.getHours() + ":" + now.getMinutes() + ":" + now.getSeconds();
+
+  const dateTime = date + " " + time;
+
+  const createUserTweetQuery = `
+      INSERT INTO
+          tweet (tweet, user_id, date_time)
+      VALUES(
+          "${tweet}",
+          ${userId},
+          "${dateTime}"
+      )
+    `;
+  await db.run(createUserTweetQuery);
+  response.send("Created a Tweet");
 });
 
 //USER DELETE TWEET API
@@ -475,12 +530,10 @@ app.delete(
     SELECT 
         * 
     FROM
-        user INNER JOIN follower 
-        ON user.user_id = follower.following_user_id
-        INNER JOIN tweet 
-        ON tweet.user_id = follower.following_user_id
+        user INNER JOIN tweet 
+        ON user.user_id = tweet.user_id
     WHERE
-        follower.follower_user_id = ${userId}
+        user.user_id = ${userId}
   `;
     const tweetsList = [];
     const dbResponse = await db.all(getUserFollowingTweetsQuery);
@@ -489,6 +542,13 @@ app.delete(
     }
 
     if (tweetsList.includes(parseInt(tweetId))) {
+      const deleteUserTweetQuery = `
+        DELETE FROM 
+            tweet 
+        WHERE
+            tweet.tweet_id = ${tweetId}
+      `;
+      await db.run(deleteUserTweetQuery);
       response.send("Tweet Removed");
     } else {
       response.status(401);
