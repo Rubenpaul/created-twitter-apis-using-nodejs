@@ -150,6 +150,8 @@ app.get("/user/tweets/feed", authenticateToken, async (request, response) => {
         ON tweet.user_id = follower.following_user_id
     WHERE 
         follower.follower_user_id = ${userId}
+    ORDER BY
+        tweet.date_time DESC 
     LIMIT ${4};
   `;
   const dbResponse = await db.all(getUserFollowingTweetsQuery);
